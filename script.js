@@ -1,231 +1,146 @@
-let board;
-let currentPiece;
-let score = 0;
-let totalLines = 0;
-let gameOver = false;
-const GRID_WIDTH = 10;
-const GRID_HEIGHT = 20;
-const BLOCK_SIZE = 30;
+const canvas = document.getElementById('tetris');
+const context = canvas.getContext('2d');
+const scoreElement = document.getElementById('score-value');
 
-// Tetromino shapes and colors
-const SHAPES = [
-  { shape: [[1, 1, 1, 1]], color: [0, 255, 255] }, // I
-  { shape: [[1, 1], [1, 1]], color: [255, 255, 0] }, // O
-  { shape: [[0, 1, 0], [1, 1, 1]], color: [255, 0, 0] }, // T
-  { shape: [[1, 1, 0], [0, 1, 1]], color: [0, 255, 0] }, // S
-  { shape: [[0, 1, 1], [1, 1, 0]], color: [255, 0, 255] }, // Z
-  { shape: [[1, 0, 0], [1, 1, 1]], color: [0, 0, 255] }, // L
-  { shape: [[0, 0, 1], [1, 1, 1]], color: [255, 165, 0] } // J
+context.scale(20, 20);
+
+const arena = createMatrix(12, 20);
+const player = {
+    pos: { x: 0, y: 0 },
+    matrix: null,
+    type: null,
+    score: 0
+};
+
+const colors = [
+    null,
+    '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF',
+    '#FF8E0D', '#FFE138', '#3877FF', '#FF5555',
+    '#55FF55', '#AA00FF', '#FFAA00', '#00AAAA'
 ];
 
-function setup() {
-  let canvasWidth = GRID_WIDTH * BLOCK_SIZE;
-  let canvasHeight = GRID_HEIGHT * BLOCK_SIZE;
-  let canvas = createCanvas(canvasWidth, canvasHeight);
-  canvas.parent('game-container');
-  board = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
-  currentPiece = newPiece();
-  frameRate(2);
-  document.getElementById('restart-btn').addEventListener('click', restartGame);
+const tetrominoes = [
+    [[1, 1, 1, 1]], // I
+    [[2, 2], [2, 2]], // O
+    [[0, 3, 0], [3, 3, 3]], // T
+    [[0, 4, 4], [4, 4, 0]], // S
+    [[5, 5, 0], [0, 5, 5]], // Z
+    [[6, 0, 0], [6, 6, 6]], // J
+    [[0, 0, 7], [7, 7, 7]], // L
+    [[8, 8, 8], [0, 8, 0]], // Extra 1
+    [[9, 0, 9], [9, 9, 9]], // Extra 2
+    [[0, 10, 0], [10, 10, 10]], // Extra 3
+    [[11, 11, 0], [0, 11, 11]], // Extra 4
+    [[0, 12, 12], [12, 12, 0]] // Extra 5
+];
 
-  // Add touch events with preventDefault to avoid scrolling/zooming
-  const buttons = {
-    'left-btn': moveLeft,
-    'right-btn': moveRight,
-    'down-btn': moveDown,
-    'rotate-btn': rotatePiece
-  };
+const wallKicksI = [
+    [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
+    [[0, 0], [2, 0], [-1, 0], [2, -1], [-1, 2]],
+    [[0, 0], [-1, 0], [2, 0], [-1, -2], [2, 1]],
+    [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]],
+    [[0, 0], [2, 0], [-1, 0], [2, -1], [-1, 2]],
+    [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
+    [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]],
+    [[0, 0], [-1, 0], [2, 0], [-1, -2], [2, 1]],
+];
 
-  for (const [id, handler] of Object.entries(buttons)) {
-    const button = document.getElementById(id);
-    button.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if (!gameOver) handler();
-    }, { passive: false });
-    button.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (!gameOver) handler();
+const wallKicksOther = [
+    [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+    [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+    [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+    [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+    [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+    [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+    [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+    [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+];
+
+function createMatrix(w, h) {
+    const matrix = [];
+    while (h--) matrix.push(new Array(w).fill(0));
+    return matrix;
+}
+
+function createPiece(type) {
+    return tetrominoes[type].map(row => [...row]);
+}
+
+function collide(arena, player) {
+    const [m, o] = [player.matrix, player.pos];
+    for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+            if (m[y][x] !== 0 &&
+                (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function merge(arena, player) {
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                arena[y + player.pos.y][x + player.pos.x] = value;
+            }
+        });
     });
-  }
-
-  document.addEventListener('keydown', keyPressed);
 }
 
-function draw() {
-  if (!gameOver) {
-    background(220);
-    drawBoard();
-    drawPiece();
-    updateGame();
-    updateSpeed();
-  }
-}
-
-function newPiece() {
-  const randomShape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-  return {
-    shape: randomShape.shape,
-    color: randomShape.color,
-    x: Math.floor(GRID_WIDTH / 2) - Math.floor(randomShape.shape[0].length / 2),
-    y: 0
-  };
-}
-
-function drawBoard() {
-  for (let y = 0; y < GRID_HEIGHT; y++) {
-    for (let x = 0; x < GRID_WIDTH; x++) {
-      if (board[y][x]) {
-        draw3DBlock(x * BLOCK_SIZE, y * BLOCK_SIZE, board[y][x]);
-      }
+function playerDrop() {
+    player.pos.y++;
+    if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
     }
-  }
+    dropCounter = 0;
 }
 
-function drawPiece() {
-  for (let y = 0; y < currentPiece.shape.length; y++) {
-    for (let x = 0; x < currentPiece.shape[y].length; x++) {
-      if (currentPiece.shape[y][x]) {
-        draw3DBlock((currentPiece.x + x) * BLOCK_SIZE, (currentPiece.y + y) * BLOCK_SIZE, currentPiece.color);
-      }
+function playerMove(dir) {
+    player.pos.x += dir;
+    if (collide(arena, player)) {
+        player.pos.x -= dir;
     }
-  }
 }
 
-function draw3DBlock(x, y, color) {
-  drawingContext.shadowColor = 'rgba(0, 0, 0, 0.3)';
-  drawingContext.shadowBlur = 8;
-  drawingContext.shadowOffsetX = 3;
-  drawingContext.shadowOffsetY = 3;
+function playerRotate() {
+    const originalMatrix = player.matrix.map(row => [...row]);
+    const originalPos = { x: player.pos.x, y: player.pos.y };
+    let rotated = false;
 
-  fill(color[0], color[1], color[2]);
-  stroke(0);
-  strokeWeight(1);
-  rect(x, y, BLOCK_SIZE, BLOCK_SIZE);
+    rotate(player.matrix);
 
-  drawingContext.shadowColor = 'transparent';
-  drawingContext.shadowBlur = 0;
-  drawingContext.shadowOffsetX = 0;
-  drawingContext.shadowOffsetY = 0;
-}
+    const wallKicks = player.type === 0 ? wallKicksI : (player.type === 1 ? [] : wallKicksOther);
+    if (wallKicks.length === 0) return;
 
-function updateGame() {
-  if (canMove(0, 1)) {
-    currentPiece.y++;
-  } else {
-    placePiece();
-    clearLines();
-    currentPiece = newPiece();
-    if (!canMove(0, 0)) {
-      gameOver = true;
-      document.getElementById('game-over').style.display = 'block';
-    }
-  }
-}
-
-function canMove(dx, dy) {
-  for (let y = 0; y < currentPiece.shape.length; y++) {
-    for (let x = 0; x < currentPiece.shape[y].length; x++) {
-      if (currentPiece.shape[y][x]) {
-        const newX = currentPiece.x + x + dx;
-        const newY = currentPiece.y + y + dy;
-        if (
-          newX < 0 || newX >= GRID_WIDTH ||
-          newY >= GRID_HEIGHT ||
-          (newY >= 0 && board[newY][newX])
-        ) {
-          return false;
+    for (let kick of wallKicks[player.rotationState || 0]) {
+        player.pos.x = originalPos.x + kick[0];
+        player.pos.y = originalPos.y + kick[1];
+        if (!collide(arena, player)) {
+            rotated = true;
+            break;
         }
-      }
     }
-  }
-  return true;
-}
 
-function placePiece() {
-  for (let y = 0; y < currentPiece.shape.length; y++) {
-    for (let x = 0; x < currentPiece.shape[y].length; x++) {
-      if (currentPiece.shape[y][x]) {
-        const boardY = currentPiece.y + y;
-        if (boardY >= 0) {
-          board[boardY][currentPiece.x + x] = currentPiece.color;
-        }
-      }
+    if (rotated) {
+        player.rotationState = (player.rotationState || 0) + 1;
+        if (player.rotationState > 3) player.rotationState = 0;
+    } else {
+        player.matrix = originalMatrix;
+        player.pos.x = originalPos.x;
+        player.pos.y = originalPos.y;
     }
-  }
 }
 
-function clearLines() {
-  let linesCleared = 0;
-  for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
-    if (board[y].every(cell => cell !== 0)) {
-      board.splice(y, 1);
-      board.unshift(Array(GRID_WIDTH).fill(0));
-      linesCleared++;
-      y++;
-    }
-  }
-  if (linesCleared > 0) {
-    score += linesCleared * 100;
-    totalLines += linesCleared;
-    document.getElementById('score').innerText = `Score: ${score}`;
-  }
-}
+function rotate(matrix) {
+    const N = matrix.length;
+    const M = matrix[0].length;
+    const result = Array.from({ length: M }, () => Array(N).fill(0));
+    for (let y = 0; y < N; y++) {
+        for (let x = 0; x < M; x++) {
+            result[x][N - 1 - y] = matrix[y][x];
 
-function rotatePiece() {
-  const newShape = Array(currentPiece.shape[0].length).fill().map(() => []);
-  for (let y = 0; y < currentPiece.shape.length; y++) {
-    for (let x = 0; x < currentPiece.shape[y].length; x++) {
-      newShape[x][currentPiece.shape.length - 1 - y] = currentPiece.shape[y][x];
-    }
-  }
-  const oldShape = currentPiece.shape;
-  currentPiece.shape = newShape;
-  if (!canMove(0, 0)) {
-    currentPiece.shape = oldShape;
-  }
-}
-
-function keyPressed() {
-  if (!gameOver) {
-    if (keyCode === LEFT_ARROW) {
-      moveLeft();
-    } else if (keyCode === RIGHT_ARROW) {
-      moveRight();
-    } else if (keyCode === DOWN_ARROW) {
-      moveDown();
-    } else if (keyCode === UP_ARROW) {
-      rotatePiece();
-    }
-  }
-}
-
-function moveLeft() {
-  if (canMove(-1, 0)) currentPiece.x--;
-}
-
-function moveRight() {
-  if (canMove(1, 0)) currentPiece.x++;
-}
-
-function moveDown() {
-  if (canMove(0, 1)) currentPiece.y++;
-}
-
-function restartGame() {
-  board = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
-  currentPiece = newPiece();
-  score = 0;
-  totalLines = 0;
-  gameOver = false;
-  document.getElementById('game-over').style.display = 'none';
-  document.getElementById('score').innerText = `Score: ${score}`;
-  frameRate(2);
-}
-
-function updateSpeed() {
-  if (totalLines >= 10) {
-    frameRate(3);
-  } else {
-    frameRate(2);
-  }
-}
